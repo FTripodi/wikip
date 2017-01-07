@@ -2,9 +2,8 @@
 
 
 import collections
-from io import StringIO
 from lxml import etree
-import pprint
+import re
 import requests
 from urllib.parse import urljoin
 
@@ -12,6 +11,7 @@ from urllib.parse import urljoin
 INDEX_URI = 'https://en.wikipedia.org/wiki/Wikipedia:Articles_for_deletion'
 CURRENT_ID = 'Current_discussions'
 OLD_ID = 'Old_discussions'
+WP_TAG = re.compile(r'WP:\w+')
 
 
 def child_matching(el, f, start=0):
@@ -30,6 +30,23 @@ def has_span(id_value, el):
         if span.get('id') == id_value:
             return True
     return False
+
+
+def next_tag(parent, tag, start=0):
+    """Find the index of the next tag or None."""
+    return child_matching(parent, lambda e: e.tag == tag, start=start)
+
+
+def all_text(el):
+    """Return all text content."""
+    text = el.text if el.text is not None else ''
+    tail = el.tail if el.tail is not None else ''
+    return text + ''.join(all_text(c) for c in el) + tail
+
+
+def next_h3(parent, start=0):
+    """Find the index of the next h3 or None."""
+    return next_tag(parent, 'h3', start)
 
 
 def find_h3(parent, id_value, start=0):
@@ -63,8 +80,11 @@ def find_links(parent, base_uri):
 def get_content(uri, parser):
     """Retrieves the document at uri and returns #mw-content-text."""
     r = requests.get(uri)
-    tree = etree.parse(StringIO(r.text), parser)
-    return tree.getroot().find('.//div[@id="mw-content-text"]')
+    r.encoding = 'latin-1'
+    root = etree.fromstring(r.text.strip(), parser)
+    with open('get-content.html', 'w') as fout:
+        fout.write(r.text.strip())
+    return root.find('.//div[@id="mw-content-text"]')
 
 
 def iter_h3_ul_links(parent, id_value, base_uri, start=0):
@@ -87,10 +107,35 @@ def get_afd_index(base_uri, parser):
     yield from links
 
 
+def get_afds(content):
+    """Look through the AfDs on the page and yield (title, tags). """
+    cursor = 0
+    while True:
+        cursor = next_h3(content, cursor)
+        if cursor is None:
+            break
+
+        title = content[cursor].findtext('./span[@class="mw-headline"]/a')
+        if title is None:
+            continue
+
+        tags = set()
+        pi = next_tag(content, 'p', cursor)
+        if pi is not None:
+            text = all_text(content[pi])
+            for wp_tag in WP_TAG.findall(text):
+                tags.add(wp_tag)
+
+        cursor += 1
+        yield (title, tags)
+
+
 def main():
     parser = etree.HTMLParser()
     for link in get_afd_index(INDEX_URI, parser):
-        pass
+        content = get_content(link, parser)
+        for title, tags in get_afds(content):
+            print(title, tags)
 
 
 if __name__ == '__main__':
