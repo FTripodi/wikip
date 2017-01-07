@@ -12,6 +12,28 @@ INDEX_URI = 'https://en.wikipedia.org/wiki/Wikipedia:Articles_for_deletion'
 CURRENT_ID = 'Current_discussions'
 OLD_ID = 'Old_discussions'
 WP_TAG = re.compile(r'WP:\w+')
+BIO_TAGS = frozenset([
+    'Authors-related',
+    'Businesspeople-related',
+    'educators-related',
+    'filmmakers-related',
+    # 'musicians-related',
+    'People-related',
+    'Women-related',
+
+    'WP:ANYBIO',
+    'WP:ARTIST',
+    'WP:BIO',
+    'WP:MUSBIO',
+    'WP:MUSICBIO',
+    'WP:NACTOR',
+])
+
+
+def is_bio(tokens, bio_tags=BIO_TAGS):
+    """This returns true if the bag-of-words token set indicates that the entry
+    is a biography."""
+    return len(tokens & bio_tags) > 0
 
 
 def child_matching(el, f, start=0):
@@ -107,35 +129,51 @@ def get_afd_index(base_uri, parser):
     yield from links
 
 
+def break_by(fn, xs):
+    """This breaks xs into chunks. The first item of each chunk passed to fn
+    should return True. Other items False.
+    """
+    accum = collections.deque()
+
+    for x in xs:
+        if fn(x) and accum:
+            yield list(accum)
+            accum.clear()
+        accum.append(x)
+
+    if accum:
+        yield list(accum)
+
+
 def get_afds(content):
     """Look through the AfDs on the page and yield (title, tags). """
-    cursor = 0
-    while True:
-        cursor = next_h3(content, cursor)
-        if cursor is None:
-            break
-
-        title = content[cursor].findtext('./span[@class="mw-headline"]/a')
+    for section in break_by(lambda e: e.tag == 'h3', content):
+        h3 = section[0]
+        title = h3.findtext('./span[@class="mw-headline"]/a')
         if title is None:
             continue
 
-        tags = set()
-        pi = next_tag(content, 'p', cursor)
-        if pi is not None:
-            text = all_text(content[pi])
-            for wp_tag in WP_TAG.findall(text):
-                tags.add(wp_tag)
+        dli = child_matching(section, lambda e: e.tag == 'dl')
+        if dli is not None:
+            section = section[dli+1:]
 
-        cursor += 1
-        yield (title, tags)
+        tags = set()
+        tokens = set()
+        for el in section:
+            text = all_text(el)
+            tags |= set(WP_TAG.findall(text))
+            tokens |= set(text.split())
+
+        yield (title, tags, tokens)
 
 
 def main():
     parser = etree.HTMLParser()
     for link in get_afd_index(INDEX_URI, parser):
+        print('\n#', link, '\n')
         content = get_content(link, parser)
-        for title, tags in get_afds(content):
-            print(title, tags)
+        for title, tags, tokens in get_afds(content):
+            print(title, is_bio(tokens | tags), tags, tokens)
 
 
 if __name__ == '__main__':
