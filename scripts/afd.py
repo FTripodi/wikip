@@ -2,6 +2,8 @@
 
 
 import collections
+import csv
+from itertools import islice
 from lxml import etree
 import re
 import requests
@@ -9,8 +11,13 @@ from urllib.parse import urljoin
 
 
 INDEX_URI = 'https://en.wikipedia.org/wiki/Wikipedia:Articles_for_deletion'
+
 CURRENT_ID = 'Current_discussions'
 OLD_ID = 'Old_discussions'
+
+OUTPUT = 'afd-bios.csv'
+HEADER = ('Entry', 'Page Link', 'AfD Link', 'Hits')
+
 WP_TAG = re.compile(r'WP:\w+')
 BIO_TAGS = frozenset([
     'Authors-related',
@@ -19,21 +26,44 @@ BIO_TAGS = frozenset([
     'filmmakers-related',
     # 'musicians-related',
     'People-related',
+    'Politicians-related',
+    'Sportspeople-related',
     'Women-related',
 
+    'WP:ACADEMIC',
     'WP:ANYBIO',
     'WP:ARTIST',
     'WP:BIO',
     'WP:MUSBIO',
     'WP:MUSICBIO',
+    'WP:NACADEMIC',
     'WP:NACTOR',
+    'WP:NSPORT',
+    'WP:TEACHER',
 ])
 
 
 def is_bio(tokens, bio_tags=BIO_TAGS):
     """This returns true if the bag-of-words token set indicates that the entry
     is a biography."""
-    return len(tokens & bio_tags) > 0
+    return tokens & bio_tags
+
+
+def is_header(node):
+    """Returns True-ish if node is a header (h3 with an a inside)."""
+    return ((node.tag == 'h3' and
+             node.find('./span[@class="mw-headline"]/a') is not None) or
+            (node.tag == 'div' and
+             'boilerplate' in node.get('class', '') and
+             'xfd-closed' in node.get('class')))
+
+
+def has_span(id_value, el):
+    """Does the element contain span[@id=id_value]?"""
+    for span in el.findall('span'):
+        if span.get('id') == id_value:
+            return True
+    return False
 
 
 def child_matching(el, f, start=0):
@@ -44,14 +74,6 @@ def child_matching(el, f, start=0):
             return i
         i += 1
     return None
-
-
-def has_span(id_value, el):
-    """Does the element contain span[@id=id_value]?"""
-    for span in el.findall('span'):
-        if span.get('id') == id_value:
-            return True
-    return False
 
 
 def next_tag(parent, tag, start=0):
@@ -92,20 +114,22 @@ def find_ul(parent, start=0):
 
 
 def find_links(parent, base_uri):
-    """Walk all the descendents of a node and return any URLs linked to."""
+    """
+    Walk all the descendents of a node and return any URLs linked to.
+
+    This also filters out any links whose text are just digits.
+    """
     for a in parent.findall('.//a'):
         href = a.get('href')
-        if href is not None:
+        if href is not None and not a.text.isdigit():
             yield urljoin(base_uri, href)
 
 
 def get_content(uri, parser):
     """Retrieves the document at uri and returns #mw-content-text."""
+    print('retreiving <{}>'.format(uri))
     r = requests.get(uri)
-    r.encoding = 'latin-1'
-    root = etree.fromstring(r.text.strip(), parser)
-    with open('get-content.html', 'w') as fout:
-        fout.write(r.text.strip())
+    root = etree.fromstring(r.content, parser)
     return root.find('.//div[@id="mw-content-text"]')
 
 
@@ -130,50 +154,111 @@ def get_afd_index(base_uri, parser):
 
 
 def break_by(fn, xs):
-    """This breaks xs into chunks. The first item of each chunk passed to fn
+    """
+    This breaks xs into chunks. The first item of each chunk passed to fn
     should return True. Other items False.
     """
     accum = collections.deque()
 
     for x in xs:
         if fn(x) and accum:
-            yield list(accum)
+            yield accum.copy()
             accum.clear()
         accum.append(x)
 
     if accum:
-        yield list(accum)
+        yield accum.copy()
+
+
+def find_text_node(parent, text):
+    """
+    This returns the first node under parent whose text property == text.
+    """
+    node = None
+    q = collections.deque([parent])
+
+    while len(q) > 0:
+        current = q.popleft()
+        if current.text == text:
+            node = current
+            break
+        q.extend(list(current))
+
+    return node
+
+
+def process_text(node, tokens, tags):
+    """This gets tags and tokens from node and adds them to the set."""
+    text = all_text(node)
+    tags |= set(WP_TAG.findall(text))
+    tokens |= set(text.split())
 
 
 def get_afds(content):
-    """Look through the AfDs on the page and yield (title, tags). """
-    for section in break_by(lambda e: e.tag == 'h3', content):
-        h3 = section[0]
-        title = h3.findtext('./span[@class="mw-headline"]/a')
-        if title is None:
+    """Look through the AfDs on the page and yield
+    (title, link, afd link, tags). """
+    for section in break_by(is_header, content):
+        if section[0].tag == 'div' and 'xfd-closed' in section[0].get('class'):
+            section = collections.deque(section[0])
+            while section and section[0].tag != 'h3':
+                section.popleft()
+            if not section:
+                break
+
+        h3 = section.popleft()
+        if h3.tag != 'h3':
             continue
+        a = h3.find('./span[@class="mw-headline"]/a')
+        try:
+            title = a.text
+        except:
+            print(etree.tostring(h3))
+            raise
+        print('\ttitle: "{}"'.format(title))
+        page_link = a.get('href')
 
-        dli = child_matching(section, lambda e: e.tag == 'dl')
-        if dli is not None:
-            section = section[dli+1:]
-
+        afd_link = None
         tags = set()
         tokens = set()
-        for el in section:
-            text = all_text(el)
-            tags |= set(WP_TAG.findall(text))
-            tokens |= set(text.split())
 
-        yield (title, tags, tokens)
+        while len(section) > 0:
+            menu = section.popleft()
+            afd_node = find_text_node(menu, 'View AfD')
+            if afd_node is None:
+                process_text(menu, tokens, tags)
+            else:
+                afd_link = afd_node.get('href')
+                break
+
+        for el in section:
+            process_text(el, tokens, tags)
+
+        links = (page_link, afd_link)
+
+        yield (title, links, tags, tokens)
+
+
+def afd_bios(root_url, parser):
+    """This yields Entry-Link-Hits tuples for the suspected bios."""
+    for link in get_afd_index(INDEX_URI, parser):
+        content = get_content(link, parser)
+        for title, links, tags, tokens in get_afds(content):
+            bio_tags = is_bio(tags | tokens)
+            if bio_tags:
+                yield (
+                    title,
+                    urljoin(link, links[0]),
+                    urljoin(link, links[1]) if links[1] is not None else None,
+                    ' '.join(sorted(bio_tags)),
+                    )
 
 
 def main():
     parser = etree.HTMLParser()
-    for link in get_afd_index(INDEX_URI, parser):
-        print('\n#', link, '\n')
-        content = get_content(link, parser)
-        for title, tags, tokens in get_afds(content):
-            print(title, is_bio(tokens | tags), tags, tokens)
+    with open(OUTPUT, 'w') as fout:
+        writer = csv.writer(fout)
+        writer.writerow(HEADER)
+        writer.writerows(afd_bios(INDEX_URI, parser))
 
 
 if __name__ == '__main__':
