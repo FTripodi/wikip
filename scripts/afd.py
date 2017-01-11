@@ -3,6 +3,7 @@
 
 import collections
 import csv
+import datetime
 from itertools import islice
 from lxml import etree
 import re
@@ -15,7 +16,7 @@ INDEX_URI = 'https://en.wikipedia.org/wiki/Wikipedia:Articles_for_deletion'
 CURRENT_ID = 'Current_discussions'
 OLD_ID = 'Old_discussions'
 
-OUTPUT = 'afd-bios.csv'
+OUTPUT = 'afd-bios-{}.csv'
 HEADER = ('Entry', 'Page Link', 'AfD Link', 'Hits')
 
 WP_TAG = re.compile(r'WP:\w+')
@@ -255,7 +256,8 @@ def afd_bios(root_url, parser):
 
 def main():
     parser = etree.HTMLParser()
-    with open(OUTPUT, 'w') as fout:
+    output = OUTPUT.format(datetime.datetime.now().strftime('%Y%m%d-%H%M'))
+    with open(output, 'w') as fout:
         writer = csv.writer(fout)
         writer.writerow(HEADER)
         writer.writerows(afd_bios(INDEX_URI, parser))
