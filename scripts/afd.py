@@ -4,7 +4,6 @@
 import collections
 import csv
 import datetime
-from itertools import islice
 from lxml import etree
 import re
 import requests
