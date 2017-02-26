@@ -4,10 +4,13 @@
 import collections
 import csv
 import datetime
-from lxml import etree
 import re
-import requests
 from urllib.parse import urljoin
+
+import click
+from click_datetime import Datetime
+from lxml import etree
+import requests
 
 
 INDEX_URI = 'https://en.wikipedia.org/wiki/Wikipedia:Articles_for_deletion'
@@ -238,28 +241,62 @@ def get_afds(content):
         yield (title, links, tags, tokens)
 
 
+def get_log_page(url, parser):
+    """Get a daily log page and return the links from it."""
+    content = get_content(url, parser)
+    for title, links, tags, tokens in get_afds(content):
+        bio_tags = is_bio(tags | tokens)
+        if bio_tags:
+            yield (
+                title,
+                urljoin(url, links[0]),
+                urljoin(url, links[1]) if links[1] is not None else None,
+                ' '.join(sorted(bio_tags)),
+                )
+
+
 def afd_bios(root_url, parser):
     """This yields Entry-Link-Hits tuples for the suspected bios."""
     for link in get_afd_index(INDEX_URI, parser):
-        content = get_content(link, parser)
-        for title, links, tags, tokens in get_afds(content):
-            bio_tags = is_bio(tags | tokens)
-            if bio_tags:
-                yield (
-                    title,
-                    urljoin(link, links[0]),
-                    urljoin(link, links[1]) if links[1] is not None else None,
-                    ' '.join(sorted(bio_tags)),
-                    )
+        yield from get_log_page(link, parser)
 
 
-def main():
+def make_day_link(date):
+    """Returns a link for the AfD's for a given day."""
+    return ('https://en.wikipedia.org/wiki/'
+            'Wikipedia:Articles_for_deletion/Log/{}_{}'.format(
+                date.strftime('%Y_%B'),
+                date.day,
+                ))
+
+
+@click.command()
+@click.option('--date', '-d', default=None, type=Datetime(format='%Y-%m-%d'),
+              help="The date to get the AfD's for. Defaults to everything "
+                   "listed on the main AfD page. The format is YYYY-MM-DD.")
+@click.option('--output', '-o', default=None,
+              help='The output file. It defaults to afd-bios-DATE.csv.')
+def main(date, output):
+    full_afd = False
+    if date is None:
+        full_afd = True
+        date = datetime.date.today()
+    else:
+        date = date.date()
+
+    if output is None:
+        output = OUTPUT.format(date.strftime('%Y%m%d'))
+
     parser = etree.HTMLParser()
-    output = OUTPUT.format(datetime.datetime.now().strftime('%Y%m%d-%H%M'))
     with open(output, 'w') as fout:
         writer = csv.writer(fout)
         writer.writerow(HEADER)
-        writer.writerows(afd_bios(INDEX_URI, parser))
+
+        if full_afd:
+            writer.writerows(afd_bios(INDEX_URI, parser))
+        else:
+            url = make_day_link(date)
+            writer.writerows(get_log_page(url, parser))
 
 
 if __name__ == '__main__':
