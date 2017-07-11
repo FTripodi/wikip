@@ -10,7 +10,6 @@ from urllib.parse import urljoin
 import click
 from click_datetime import Datetime
 from lxml import etree
-import requests
 
 from afd import get_content
 
@@ -59,9 +58,8 @@ def iter_new_pages(url, content):
                 print(etree.tostring(li))
                 raise
 
-            print(title, time, time.date(), DATE, time.date() < DATE, time.date() == DATE)
             yield NewPageInfo(title, user, time, page_url, original,
-                                  history)
+                              history)
 
 
 def get_next(url, content):
@@ -89,7 +87,7 @@ def make_day_link(date):
             'limit=500'.format(
                 next_day.strftime('%Y%m%d')))
 
-                
+
 def get_new(url, parser):
     """\
     While the page is for the given date, download the new pages
@@ -100,7 +98,6 @@ def get_new(url, parser):
     next_page = get_next(url, content)
     if next_page is not None:
         yield from get_new(next_page, parser)
-    
 
 
 @click.command()
@@ -130,7 +127,7 @@ def main(date, output):
         rows = dropwhile(lambda r: r.timestamp.date() < date, rows)
         rows = takewhile(lambda r: r.timestamp.date() == date, rows)
         writer.writerows(rows)
-        
-        
+
+
 if __name__ == '__main__':
     main()
