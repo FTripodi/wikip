@@ -133,7 +133,8 @@ def get_content(uri, parser):
     print('retreiving <{}>'.format(uri))
     r = requests.get(uri)
     root = etree.fromstring(r.content, parser)
-    return root.find('.//div[@id="mw-content-text"]')
+    return root.find('.//div[@id="mw-content-text"]/'
+                     'div[@class="mw-parser-output"]')
 
 
 def iter_h3_ul_links(parent, id_value, base_uri, start=0):
@@ -200,6 +201,7 @@ def process_text(node, tokens, tags):
 def get_afds(content):
     """Look through the AfDs on the page and yield
     (title, link, afd link, tags). """
+    count = 0
     for section in break_by(is_header, content):
         if section[0].tag == 'div' and 'xfd-closed' in section[0].get('class'):
             section = collections.deque(section[0])
@@ -238,7 +240,9 @@ def get_afds(content):
 
         links = (page_link, afd_link)
 
+        count += 1
         yield (title, links, tags, tokens)
+    print('\tyielded {} links'.format(count))
 
 
 def get_log_page(url, parser):
@@ -257,7 +261,7 @@ def get_log_page(url, parser):
 
 def afd_bios(root_url, parser):
     """This yields Entry-Link-Hits tuples for the suspected bios."""
-    for link in get_afd_index(INDEX_URI, parser):
+    for link in get_afd_index(root_url, parser):
         yield from get_log_page(link, parser)
 
 
