@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
 
+import calendar
 import collections
 import csv
 import datetime
+from itertools import islice
 import re
 from urllib.parse import urljoin
 
@@ -274,13 +276,39 @@ def make_day_link(date):
                 ))
 
 
+def iter_first_weeks(start_date, end_date):
+    """\
+    Iterate over the days in the first week of each month from start_date to
+    end_date.
+    """
+    cal = calendar.Calendar()
+    current = start_date.replace(day=1)
+    while current <= end_date:
+        yield from islice(cal.itermonthdates(current.year, current.month), 7)
+        if current.month == 12:
+            current = current.replace(year=current.year+1, month=1)
+        else:
+            current = current.replace(month=current.month+1)
+
+
+def afd_weeklies(start_date, end_date, parser):
+    """Generate weekly AfDs for the first week of each month."""
+    for day in iter_first_weeks(start_date, end_date):
+        url = make_day_link(day)
+        yield from get_log_page(url, parser)
+
+
 @click.command()
 @click.option('--date', '-d', default=None, type=Datetime(format='%Y-%m-%d'),
               help="The date to get the AfD's for. Defaults to everything "
                    "listed on the main AfD page. The format is YYYY-MM-DD.")
+@click.option('--weekly', default=False, is_flag=True,
+              help='Generate reports for the first week of each month, '
+                   'starting with DATE and continuing to now.')
 @click.option('--output', '-o', default=None,
               help='The output file. It defaults to afd-bios-DATE.csv.')
-def main(date, output):
+def main(date, weekly, output):
+    """Download AfDs for a date or range."""
     full_afd = False
     if date is None:
         full_afd = True
@@ -298,6 +326,9 @@ def main(date, output):
 
         if full_afd:
             writer.writerows(afd_bios(INDEX_URI, parser))
+        elif weekly:
+            writer.writerows(afd_weeklies(date, datetime.date.today(),
+                                          parser))
         else:
             url = make_day_link(date)
             writer.writerows(get_log_page(url, parser))
