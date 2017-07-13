@@ -280,11 +280,20 @@ def iter_first_weeks(start_date, end_date):
     """\
     Iterate over the days in the first week of each month from start_date to
     end_date.
+
+    "Weeks" are the first full week of each month, and weeks begin with Sunday.
     """
-    cal = calendar.Calendar()
+    cal = calendar.Calendar(firstweekday=6)
     current = start_date.replace(day=1)
     while current <= end_date:
-        yield from islice(cal.itermonthdates(current.year, current.month), 7)
+        month = cal.itermonthdates(current.year, current.month)
+
+        first_week = list(islice(month, 7))
+        if first_week[0].day > 7:
+            first_week = islice(month, 7)
+
+        yield from first_week
+
         if current.month == 12:
             current = current.replace(year=current.year+1, month=1)
         else:
