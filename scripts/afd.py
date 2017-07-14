@@ -22,7 +22,7 @@ CURRENT_ID = 'Current_discussions'
 OLD_ID = 'Old_discussions'
 
 OUTPUT = 'afd-bios-{}.csv'
-HEADER = ('Entry', 'Page Link', 'AfD Link', 'Hits')
+HEADER = ('AfD Date', 'Entry', 'Page Link', 'AfD Link', 'Hits')
 
 WP_TAG = re.compile(r'WP:\w+')
 BIO_TAGS = frozenset([
@@ -155,13 +155,28 @@ def exception(*args, **kwargs):
     logging.getLogger('afd').exception(*args, **kwargs)
 
 
-def get_content(uri, parser):
-    """Retrieves the document at uri and returns #mw-content-text."""
+def get_content(uri, parser, links=False):
+    """\
+    Retrieves the document at uri and returns #mw-content-text.
+
+    Optionally, it also returns the link elements as a dict.
+    """
     info('retreiving <{}>'.format(uri))
     r = requests.get(uri)
     root = etree.fromstring(r.content, parser)
-    return root.find('.//div[@id="mw-content-text"]/'
-                     'div[@class="mw-parser-output"]')
+    content = root.find('.//div[@id="mw-content-text"]/'
+                        'div[@class="mw-parser-output"]')
+
+    if links:
+        link_dict = {
+            link.get('rel'): link.get('href')
+            for link in root.iter('link')
+            }
+        retval = (link_dict, content)
+    else:
+        retval = content
+
+    return retval
 
 
 def iter_h3_ul_links(parent, id_value, base_uri, start=0):
@@ -225,9 +240,10 @@ def process_text(node, tokens, tags):
     tokens |= set(text.split())
 
 
-def get_afds(content):
+def get_afds(afd_date, content):
     """Look through the AfDs on the page and yield
-    (title, link, afd link, tags). """
+    (date_of_afd, title, link, afd link, tags). """
+    afd_date = afd_date.strftime('%Y-%m-%d')
     count = 0
     for section in break_by(is_header, content):
         if section[0].tag == 'div' and 'xfd-closed' in section[0].get('class'):
@@ -273,17 +289,26 @@ def get_afds(content):
         links = (page_link, afd_link)
 
         count += 1
-        yield (title, links, tags, tokens)
+        yield (afd_date, title, links, tags, tokens)
     info('yielded %d links', count)
+
+
+def url_to_date(url):
+    """This parses a URL, taking the last part and parsing it to a datetime."""
+    parts = url.split('/')
+    date_path = parts.pop()
+    return datetime.datetime.strptime(date_path, '%Y_%B_%d')
 
 
 def get_log_page(url, parser):
     """Get a daily log page and return the links from it."""
-    content = get_content(url, parser)
-    for title, links, tags, tokens in get_afds(content):
+    links, content = get_content(url, parser, links=True)
+    page_date = url_to_date(links['canonical'])
+    for date, title, links, tags, tokens in get_afds(page_date, content):
         bio_tags = is_bio(tags | tokens)
         if bio_tags:
             yield (
+                date,
                 title,
                 urljoin(url, links[0]),
                 urljoin(url, links[1]) if links[1] is not None else None,
