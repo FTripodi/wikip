@@ -6,6 +6,7 @@ import collections
 import csv
 import datetime
 from itertools import islice
+import logging
 import re
 from urllib.parse import urljoin
 
@@ -130,9 +131,33 @@ def find_links(parent, base_uri):
             yield urljoin(base_uri, href)
 
 
+def critical(*args, **kwargs):
+    logging.getLogger('afd').critical(*args, **kwargs)
+
+
+def error(*args, **kwargs):
+    logging.getLogger('afd').error(*args, **kwargs)
+
+
+def warning(*args, **kwargs):
+    logging.getLogger('afd').warning(*args, **kwargs)
+
+
+def info(*args, **kwargs):
+    logging.getLogger('afd').info(*args, **kwargs)
+
+
+def debug(*args, **kwargs):
+    logging.getLogger('afd').info(*args, **kwargs)
+
+
+def exception(*args, **kwargs):
+    logging.getLogger('afd').exception(*args, **kwargs)
+
+
 def get_content(uri, parser):
     """Retrieves the document at uri and returns #mw-content-text."""
-    print('retreiving <{}>'.format(uri))
+    info('retreiving <{}>'.format(uri))
     r = requests.get(uri)
     root = etree.fromstring(r.content, parser)
     return root.find('.//div[@id="mw-content-text"]/'
@@ -215,14 +240,19 @@ def get_afds(content):
         h3 = section.popleft()
         if h3.tag != 'h3':
             continue
-        a = h3.find('./span[@class="mw-headline"]/a')
+        span = h3.find('.//span[@class="mw-headline"]')
         try:
-            title = a.text
+            if len(span) == 0:
+                title = span.text
+                page_link = None
+            else:
+                a = span[0]
+                title = a.text
+                page_link = a.get('href')
         except:
-            print(etree.tostring(h3))
+            exception(etree.tostring(h3))
             raise
-        print('\ttitle: "{}"'.format(title))
-        page_link = a.get('href')
+        debug('title: "%s"', title)
 
         afd_link = None
         tags = set()
@@ -244,7 +274,7 @@ def get_afds(content):
 
         count += 1
         yield (title, links, tags, tokens)
-    print('\tyielded {} links'.format(count))
+    info('yielded %d links', count)
 
 
 def get_log_page(url, parser):
@@ -314,10 +344,16 @@ def afd_weeklies(start_date, end_date, parser):
 @click.option('--weekly', default=False, is_flag=True,
               help='Generate reports for the first week of each month, '
                    'starting with DATE and continuing to now.')
+@click.option('--level', '-l', default='WARNING',
+              type=click.Choice(['CRITICAL', 'ERROR', 'WARNING', 'INFO',
+                                 'DEBUG']))
 @click.option('--output', '-o', default=None,
               help='The output file. It defaults to afd-bios-DATE.csv.')
-def main(date, weekly, output):
+def main(date, weekly, level, output):
     """Download AfDs for a date or range."""
+    logging.basicConfig()
+    logging.getLogger('afd').setLevel(getattr(logging, level))
+
     full_afd = False
     if date is None:
         full_afd = True
