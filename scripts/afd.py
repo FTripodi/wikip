@@ -331,6 +331,51 @@ def make_day_link(date):
                 ))
 
 
+def in_week(cal, cache, week_num, date):
+    """\
+    Returns True if date is in week # week_num.
+
+    The calculations are based off of the calendar passed in, and work
+    that might apply to this calculation on other dates are stored in the
+    cache.
+
+    >>> cal = calendar.Calendar()
+    >>> cache = {}
+    >>> jul1 = datetime.date(2017, 7, 1)
+    >>> [in_week(cal, cache, week, jul1) for week in range(6)]
+    [True, False, False, False, False, False]
+    >>> jul4 = datetime.date(2017, 7, 4)
+    >>> [in_week(cal, cache, week, jul4) for week in range(6)]
+    [False, True, False, False, False, False]
+    >>> jul12 = datetime.date(2017, 7, 12)
+    >>> [in_week(cal, cache, week, jul12) for week in range(6)]
+    [False, False, True, False, False, False]
+    >>> jul20 = datetime.date(2017, 7, 20)
+    >>> [in_week(cal, cache, week, jul20) for week in range(6)]
+    [False, False, False, True, False, False]
+    >>> jul28 = datetime.date(2017, 7, 28)
+    >>> [in_week(cal, cache, week, jul28) for week in range(6)]
+    [False, False, False, False, True, False]
+    >>> jul31 = datetime.date(2017, 7, 31)
+    >>> [in_week(cal, cache, week, jul31) for week in range(6)]
+    [False, False, False, False, False, True]
+    """
+    key = (date.year, date.month, week_num)
+
+    if key not in cache:
+        month = cal.itermonthdates(date.year, date.month)
+
+        current_week = list(islice(month, 7))
+        if week_num > 0 and current_week[0].day <= 7:
+            week_num -= 1
+        for _ in range(week_num):
+            current_week = list(islice(month, 7))
+
+        cache[key] = set(current_week)
+
+    return date in cache[key]
+
+
 def iter_first_weeks(start_date, end_date):
     """\
     Iterate over the days in the first week of each month from start_date to
@@ -362,46 +407,78 @@ def afd_weeklies(start_date, end_date, parser):
         yield from get_log_page(url, parser)
 
 
+class DateRange(click.ParamType):
+    name = 'date-range'
+
+    def convert(self, value, param, ctx):
+        start, end = value.split('/')
+        return (datetime.datetime.strptime(start, '%Y-%m-%d'),
+                datetime.datetime.strptime(end, '%Y-%m-%d'))
+
+
 @click.command()
 @click.option('--date', '-d', default=None, type=Datetime(format='%Y-%m-%d'),
               help="The date to get the AfD's for. Defaults to everything "
                    "listed on the main AfD page. The format is YYYY-MM-DD.")
-@click.option('--weekly', default=False, is_flag=True,
-              help='Generate reports for the first week of each month, '
-                   'starting with DATE and continuing to now.')
+@click.option('--date-range', '-r', default=None, type=DateRange(),
+              help="An inclusive range of dates to scrape. The format is "
+                   "YYYY-MM-DD/YYYY-MM-DD")
+@click.option('--week', '-w', default=None, type=int,
+              help='Generate reports only for a particular week '
+                   'of the month. 0 is the first week, 1 is the '
+                   'first full week of the month. Omitting this '
+                   'processes all days. This only applies in '
+                   'conjunction with either --date or --date-range.')
 @click.option('--level', '-l', default='WARNING',
               type=click.Choice(['CRITICAL', 'ERROR', 'WARNING', 'INFO',
                                  'DEBUG']))
 @click.option('--output', '-o', default=None,
               help='The output file. It defaults to afd-bios-DATE.csv.')
-def main(date, weekly, level, output):
+@click.option('--test', '-t', is_flag=True,
+              help='Run doctests on the functions instead of scraping '
+                   'Wikipedia.')
+def main(date, date_range, week, level, output, test):
     """Download AfDs for a date or range."""
     logging.basicConfig()
     logging.getLogger('afd').setLevel(getattr(logging, level))
 
-    full_afd = False
-    if date is None:
-        full_afd = True
-        date = datetime.date.today()
+    if test:
+        import doctest
+        failure_count, test_count = doctest.testmod()
+        raise SystemExit(failure_count)
+
+    parser = etree.HTMLParser()
+    day = datetime.timedelta(days=1)
+
+    if date and date_range is None:
+        date_range = (date, date + day)
+
+    if date_range:
+        current, end = date_range
+        dates = []
+        while current < end:
+            dates.append(current.date())
+            current += day
+
+        if week:
+            cal = calendar.Calendar(firstweekday=6)
+            week_cache = {}
+            dates = (date for date in dates
+                     if in_week(cal, week_cache, week, date))
+
+        links = (make_day_link(date) for date in dates)
+
     else:
-        date = date.date()
+        links = get_afd_index(INDEX_URI, parser)
 
     if output is None:
         output = OUTPUT.format(date.strftime('%Y%m%d'))
 
-    parser = etree.HTMLParser()
     with open(output, 'w') as fout:
         writer = csv.writer(fout)
         writer.writerow(HEADER)
-
-        if full_afd:
-            writer.writerows(afd_bios(INDEX_URI, parser))
-        elif weekly:
-            writer.writerows(afd_weeklies(date, datetime.date.today(),
-                                          parser))
-        else:
-            url = make_day_link(date)
-            writer.writerows(get_log_page(url, parser))
+        for link in links:
+            writer.writerows(get_log_page(link, parser))
 
 
 if __name__ == '__main__':
