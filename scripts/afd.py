@@ -22,7 +22,7 @@ CURRENT_ID = 'Current_discussions'
 OLD_ID = 'Old_discussions'
 
 OUTPUT = 'afd-bios-{}.csv'
-HEADER = ('AfD Date', 'Entry', 'Page Link', 'AfD Link', 'Hits')
+HEADER = ('AfD Date', 'Entry', 'Page Link', 'AfD Link', 'Hits', 'Keep')
 
 WP_TAG = re.compile(r'WP:\w+')
 BIO_TAGS = frozenset([
@@ -242,7 +242,7 @@ def process_text(node, tokens, tags):
 
 def get_afds(afd_date, content):
     """Look through the AfDs on the page and yield
-    (date_of_afd, title, link, afd link, tags). """
+    (date_of_afd, title, link, afd link, tags, keep_flag). """
     afd_date = afd_date.strftime('%Y-%m-%d')
     count = 0
     for section in break_by(is_header, content):
@@ -261,10 +261,12 @@ def get_afds(afd_date, content):
             if len(span) == 0:
                 title = span.text
                 page_link = None
+                keep = False
             else:
                 a = span[0]
                 title = a.text
                 page_link = a.get('href')
+                keep = a.get('class', None) != 'new'
         except:
             exception(etree.tostring(h3))
             raise
@@ -289,7 +291,7 @@ def get_afds(afd_date, content):
         links = (page_link, afd_link)
 
         count += 1
-        yield (afd_date, title, links, tags, tokens)
+        yield (afd_date, title, links, tags, tokens, keep)
     info('yielded %d links', count)
 
 
@@ -304,7 +306,7 @@ def get_log_page(url, parser):
     """Get a daily log page and return the links from it."""
     links, content = get_content(url, parser, links=True)
     page_date = url_to_date(links['canonical'])
-    for date, title, links, tags, tokens in get_afds(page_date, content):
+    for date, title, links, tags, tokens, keep in get_afds(page_date, content):
         bio_tags = is_bio(tags | tokens)
         if bio_tags:
             yield (
@@ -313,6 +315,7 @@ def get_log_page(url, parser):
                 urljoin(url, links[0]),
                 urljoin(url, links[1]) if links[1] is not None else None,
                 ' '.join(sorted(bio_tags)),
+                keep,
                 )
 
 
