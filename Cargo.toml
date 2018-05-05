@@ -1,0 +1,6 @@
+[package]
+name = "wikip"
+version = "0.1.0"
+authors = ["Eric Rochester <eric.rochester@willowtreeapps.com>"]
+
+[dependencies]
