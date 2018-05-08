@@ -1,6 +1,11 @@
 [package]
+authors = ["Eric Rochester <erochest@gmail.com>"]
 name = "wikip"
 version = "0.1.0"
-authors = ["Eric Rochester <eric.rochester@willowtreeapps.com>"]
-
 [dependencies]
+chrono = "0.4.2"
+clap = "2.31.2"
+failure = "0.1.1"
+failure_derive = "0.1.1"
+log = "0.4.1"
+simple-logging = "2.0.1"
