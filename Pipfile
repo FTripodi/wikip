@@ -1,0 +1,27 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+bpython = "~=0.18"
+flake8 = "~=3.7.9"
+mccabe = "~=0.6.1"
+pycodestyle = "~=2.5.0"
+pyflakes = "~=2.1.1"
+pylint = "*"
+
+[packages]
+blessings = "~=1.6"
+click = "~=7.0"
+click-datetime = "~=0.2"
+curtsies = "~=0.3.1"
+greenlet = "~=0.4.15"
+lxml = "~=4.5.0"
+requests = "~=2.23.0"
+six = "~=1.14.0"
+wcwidth = "~=0.1.8"
+Pygments = "~=2.5.2"
+
+[requires]
+python_version = "3.7"
