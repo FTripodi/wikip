@@ -458,6 +458,7 @@ def main(date, date_range, week, level, output, test):
 
     if date_range:
         current, end = date_range
+        date = current
         dates = []
         while current < end:
             dates.append(current.date())
